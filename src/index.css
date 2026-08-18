@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 0.4in;
+  }
+
+  /* Browsers strip background colors when printing by default; force the
+     workstation color blocks to actually show up on paper. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
