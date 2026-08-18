@@ -5,6 +5,7 @@ import {
   MIN_SHIFT_HOURS,
   SLOT_HOURS,
   START_HOUR,
+  type Day,
   type Intern,
   type ScheduleSlot,
 } from './types';
@@ -132,6 +133,82 @@ export function formatHour(hour: number): string {
 
 export function formatHours(value: number): string {
   return (Math.round(value * 100) / 100).toString();
+}
+
+export interface CellPlan {
+  isStart: boolean;
+  rowSpan: number;
+  internId: string | null;
+}
+
+function buildAssignmentLookup(slots: ScheduleSlot[]) {
+  const map = new Map<string, ScheduleSlot>();
+  slots.forEach((s) => map.set(`${s.day}-${s.hour}`, s));
+  return (day: Day, hour: number, workstationIdx: number) =>
+    map.get(`${day}-${hour}`)?.assignments[workstationIdx] ?? null;
+}
+
+// For each (day, workstation) column, collapse consecutive quarter-hour
+// slots assigned to the same intern into a single spanning cell, so the
+// schedule reads as continuous blocks instead of one row per 15 minutes.
+// Shared by the on-screen grid, the print view, and PDF export so they
+// never disagree on how a schedule is laid out.
+export function buildColumnPlans(
+  slots: ScheduleSlot[],
+  displayDays: Day[],
+  numWorkstations: number,
+  hoursList: number[],
+): CellPlan[][] {
+  const assignmentAt = buildAssignmentLookup(slots);
+  return displayDays.flatMap((day) =>
+    Array.from({ length: numWorkstations }, (_unused, idx) => {
+      const plan: CellPlan[] = [];
+      let row = 0;
+      while (row < hoursList.length) {
+        const internId = assignmentAt(day, hoursList[row], idx);
+        let span = 1;
+        while (
+          row + span < hoursList.length &&
+          assignmentAt(day, hoursList[row + span], idx) === internId
+        ) {
+          span++;
+        }
+        plan.push({ isStart: true, rowSpan: span, internId });
+        for (let k = 1; k < span; k++) plan.push({ isStart: false, rowSpan: 0, internId });
+        row += span;
+      }
+      return plan;
+    }),
+  );
+}
+
+// Hours where nobody is scheduled at any currently-displayed workstation are
+// dropped, so print/PDF output only shows actual working time.
+export function computePrintHours(
+  slots: ScheduleSlot[],
+  displayDays: Day[],
+  numWorkstations: number,
+  hours: number[],
+): number[] {
+  const assignmentAt = buildAssignmentLookup(slots);
+  return hours.filter((hour) =>
+    displayDays.some((day) => {
+      for (let idx = 0; idx < numWorkstations; idx++) {
+        if (assignmentAt(day, hour, idx) !== null) return true;
+      }
+      return false;
+    }),
+  );
+}
+
+// Whether any currently-displayed column starts a new shift (or goes idle)
+// at this row — used to decide whether a quarter-hour time label is worth
+// printing.
+export function hasTransitionAt(plans: CellPlan[][], numColumns: number, rowIdx: number): boolean {
+  for (let col = 0; col < numColumns; col++) {
+    if (plans[col]?.[rowIdx]?.isStart) return true;
+  }
+  return false;
 }
 
 export interface InternHourSummary {
